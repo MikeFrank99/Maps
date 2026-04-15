@@ -3,7 +3,7 @@ on:
   push:
     paths:
       - 'input_maps/**'
-permissions: # AGGIUNTO: Permessi espliciti per scrivere nella repo
+permissions:
   contents: write
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # AGGIUNTO: Token per il push
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install GDAL
         run: |
@@ -22,19 +22,32 @@ jobs:
 
       - name: Generate Tiles and Sync
         run: |
-          current_maps=$(ls input_maps/*.webp 2>/dev/null | xargs -n 1 basename -s .webp || echo "")
+          # Abilita il riconoscimento di pattern estesi
+          shopt -s nullglob
           
-          for img in input_maps/*.webp; do
-            [ -e "$img" ] || continue
-            folder_name=$(basename "$img" .webp)
+          # 1. Crea lista dei nomi file senza estensione per la pulizia
+          current_maps=""
+          for img in input_maps/*.{webp,png,jpg,jpeg}; do
+            name=$(basename "$img" | sed -E 's/\.(webp|png|jpg|jpeg)$//')
+            current_maps="$current_maps $name "
+          done
+          
+          # 2. Genera tasselli per ogni immagine
+          for img in input_maps/*.{webp,png,jpg,jpeg}; do
+            folder_name=$(basename "$img" | sed -E 's/\.(webp|png|jpg|jpeg)$//')
+            echo "Elaborazione mappa: $folder_name"
             mkdir -p "$folder_name"
+            # Generiamo i tile (output sempre .png per compatibilità)
             gdal2tiles.py -p raster --xyz -z 0-5 -w none "$img" "$folder_name"
           done
 
+          # 3. Pulizia cartelle obsolete (rimuove cartelle che non hanno più un file in input_maps)
           for dir in */; do
             dir=${dir%/}
+            # Salta cartelle di sistema e input_maps
             if [ "$dir" != "input_maps" ] && [[ ! "$dir" =~ ^\. ]]; then
               if [[ ! " $current_maps " =~ " $dir " ]]; then
+                echo "Rimozoione cartella obsoleta: $dir"
                 rm -rf "$dir"
               fi
             fi
@@ -45,5 +58,4 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          # Evita errore se non ci sono cambiamenti
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync tiles" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync tiles (multi-format)" && git push)
