@@ -3,12 +3,17 @@ on:
   push:
     paths:
       - 'input_maps/**'
+permissions: # AGGIUNTO: Permessi espliciti per scrivere nella repo
+  contents: write
+
 jobs:
   build-tiles:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # AGGIUNTO: Token per il push
 
       - name: Install GDAL
         run: |
@@ -17,10 +22,8 @@ jobs:
 
       - name: Generate Tiles and Sync
         run: |
-          # 1. Lista mappe attuali
           current_maps=$(ls input_maps/*.webp 2>/dev/null | xargs -n 1 basename -s .webp || echo "")
           
-          # 2. Genera tasselli per ogni webp
           for img in input_maps/*.webp; do
             [ -e "$img" ] || continue
             folder_name=$(basename "$img" .webp)
@@ -28,7 +31,6 @@ jobs:
             gdal2tiles.py -p raster --xyz -z 0-5 -w none "$img" "$folder_name"
           done
 
-          # 3. Pulizia cartelle obsolete
           for dir in */; do
             dir=${dir%/}
             if [ "$dir" != "input_maps" ] && [[ ! "$dir" =~ ^\. ]]; then
@@ -40,8 +42,8 @@ jobs:
 
       - name: Commit and Push
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Auto-sync tiles from input_maps" || exit 0
-          git push
+          # Evita errore se non ci sono cambiamenti
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync tiles" && git push)
