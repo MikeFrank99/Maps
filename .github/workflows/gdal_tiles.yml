@@ -1,0 +1,47 @@
+name: Generate Map Tiles
+on:
+  push:
+    paths:
+      - 'input_maps/**'
+jobs:
+  build-tiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install GDAL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin python3-gdal
+
+      - name: Generate Tiles and Sync
+        run: |
+          # 1. Lista mappe attuali
+          current_maps=$(ls input_maps/*.webp 2>/dev/null | xargs -n 1 basename -s .webp || echo "")
+          
+          # 2. Genera tasselli per ogni webp
+          for img in input_maps/*.webp; do
+            [ -e "$img" ] || continue
+            folder_name=$(basename "$img" .webp)
+            mkdir -p "$folder_name"
+            gdal2tiles.py -p raster --xyz -z 0-5 -w none "$img" "$folder_name"
+          done
+
+          # 3. Pulizia cartelle obsolete
+          for dir in */; do
+            dir=${dir%/}
+            if [ "$dir" != "input_maps" ] && [[ ! "$dir" =~ ^\. ]]; then
+              if [[ ! " $current_maps " =~ " $dir " ]]; then
+                rm -rf "$dir"
+              fi
+            fi
+          done
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add .
+          git commit -m "Auto-sync tiles from input_maps" || exit 0
+          git push
