@@ -20,35 +20,49 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gdal-bin python3-gdal
 
-      - name: Generate Tiles and Sync
+      - name: Generate Tiles, Sync and Map List
         run: |
-          # Abilita il riconoscimento di pattern estesi
           shopt -s nullglob
           
-          # 1. Crea lista dei nomi file senza estensione per la pulizia
-          current_maps=""
+          # Inizializziamo le variabili per la gestione della lista
+          current_maps_string=""
+          json_list="["
+          
+          # 1. Processiamo ogni immagine nella cartella input_maps
           for img in input_maps/*.{webp,png,jpg,jpeg}; do
+            # Estraiamo il nome senza estensione
             name=$(basename "$img" | sed -E 's/\.(webp|png|jpg|jpeg)$//')
-            current_maps="$current_maps $name "
+            
+            # Costruiamo la stringa per il confronto e il JSON per il sito web
+            current_maps_string="$current_maps_string $name "
+            if [ "$json_list" != "[" ]; then json_list+=","; fi
+            json_list+="\"$name\""
+            
+            echo "--- Elaborazione mappa: $name ---"
+            mkdir -p "$name"
+            
+            # Comando GDAL: -z 0-5 definisce lo zoom (puoi aumentarlo a 0-6 se necessario)
+            gdal2tiles.py -p raster --xyz -z 0-5 -w none "$img" "$name"
           done
           
-          # 2. Genera tasselli per ogni immagine
-          for img in input_maps/*.{webp,png,jpg,jpeg}; do
-            folder_name=$(basename "$img" | sed -E 's/\.(webp|png|jpg|jpeg)$//')
-            echo "Elaborazione mappa: $folder_name"
-            mkdir -p "$folder_name"
-            # Generiamo i tile (output sempre .png per compatibilità)
-            gdal2tiles.py -p raster --xyz -z 0-5 -w none "$img" "$folder_name"
-          done
+          json_list+="]"
+          
+          # 2. Salviamo il file JSON che il tuo index.html userà per il selettore
+          echo "$json_list" > map_list.json
+          echo "Lista mappe aggiornata: $json_list"
 
-          # 3. Pulizia cartelle obsolete (rimuove cartelle che non hanno più un file in input_maps)
+          # 3. Pulizia cartelle obsolete
+          # Rimuove le directory dei tasselli se il file sorgente non esiste più
           for dir in */; do
             dir=${dir%/}
-            # Salta cartelle di sistema e input_maps
+            # Proteggiamo cartelle di sistema e la cartella di input
             if [ "$dir" != "input_maps" ] && [[ ! "$dir" =~ ^\. ]]; then
-              if [[ ! " $current_maps " =~ " $dir " ]]; then
-                echo "Rimozoione cartella obsoleta: $dir"
-                rm -rf "$dir"
+              if [[ ! " $current_maps_string " =~ " $name " ]]; then
+                # Nota: qui confrontiamo il nome della cartella con la stringa dei file validi
+                if [[ ! " $current_maps_string " =~ " $dir " ]]; then
+                   echo "Rimozione cartella obsoleta: $dir"
+                   rm -rf "$dir"
+                fi
               fi
             fi
           done
@@ -58,4 +72,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync tiles (multi-format)" && git push)
+          # Il comando esegue il commit e il push solo se ci sono modifiche effettive
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-sync tiles and map list" && git push)
